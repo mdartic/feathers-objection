@@ -155,7 +155,7 @@ class Service extends AdapterService {
    * @param methodKey
    * @param allowRefs
    */
-  objectify (query, params, parentKey, methodKey, allowRefs) {
+  objectify (query, params, parentKey, methodKey, allowRefs, hierarchy = []) {
     if (params.$eager) { delete params.$eager; }
     if (params.$joinEager) { delete params.$joinEager; }
     if (params.$joinRelation) { delete params.$joinRelation; }
@@ -169,14 +169,15 @@ class Service extends AdapterService {
       let value = params[key];
 
       if (utils.isPlainObject(value)) {
-        return this.objectify(query, value, key, parentKey, allowRefs);
+        hierarchy.push(key)
+        return this.objectify(query, value, key, parentKey, allowRefs, hierarchy);
       }
 
       const column = parentKey && parentKey[0] !== '$' ? parentKey : key;
       const method = METHODS[methodKey] || METHODS[parentKey] || METHODS[key];
       const operator = OPERATORS_MAP[key] || '=';
 
-      if (method) {
+      if (method && hierarchy.length === 0) {
         if (key === '$or') {
           const self = this;
 
@@ -208,7 +209,13 @@ class Service extends AdapterService {
         return query[method].call(query, column, value); // eslint-disable-line no-useless-call
       }
 
-      const property = this.jsonSchema && (this.jsonSchema.properties[column] || (methodKey && this.jsonSchema.properties[methodKey]));
+      const property =
+        this.jsonSchema
+        && (
+          this.jsonSchema.properties[column]
+          || hierarchy.length > 0 && this.jsonSchema.properties[hierarchy[0]]
+          || (methodKey && this.jsonSchema.properties[methodKey])
+        );
       let columnType = property && property.type;
       if (columnType) {
         if (Array.isArray(columnType)) { columnType = columnType[0]; }
@@ -231,6 +238,13 @@ class Service extends AdapterService {
             if (typeof value === 'string' && value[0] === '[' && value[value.length - 1] === ']') { value = JSON.parse(value); }
           }
 
+          if (method) {
+            return query[method].call(
+              query,
+              NON_COMPARISON_OPERATORS.includes(operator) ? refColumn : refColumn.castText(),
+              value
+            );
+          }
           return query.where(
             NON_COMPARISON_OPERATORS.includes(operator) ? refColumn : refColumn.castText(),
             operator,
